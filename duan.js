@@ -7,9 +7,10 @@ L.tileLayer('http://{s}.tile.osm.org/{z}/{x}/{y}.png', {
 
 var sensors;
 var roadGraph = {};
-var lines = {}; 
+var lines = {};
+var highlightedRoute = null;
 
-window.onload = function() {
+window.onload = function () {
   fetch('/sensors')
     .then(response => response.json())
     .then(fetchedSensors => {
@@ -32,75 +33,46 @@ fetch('http://localhost:3000/sensors')
   .catch(error => {
     console.log('There was a problem with the fetch operation: ', error);
   });
-
+var roads = [{ "name": "Duong Dinh Nghe", "startSensor": "S1", "endSensor": "S2", "startLocation": [21.02014, 105.785783], "endLocation": [21.022945, 105.790246] },
+{ "name": "Mac Thai To", "startSensor": "S3", "endSensor": "S4", "startLocation": [21.016492, 105.788701], "endLocation": [21.018817, 105.792563] },
+{ "name": "Mac Thai Tong", "startSensor": "S5", "endSensor": "S6", "startLocation": [21.011802, 105.792435], "endLocation": [21.014328, 105.795653] },
+{ "name": "Trung Kinh 1", "startSensor": "S2", "endSensor": "S4", "startLocation": [21.022945, 105.790246], "endLocation": [21.018817, 105.792563] },
+{ "name": "Trung Kinh 2", "startSensor": "S4", "endSensor": "S6", "startLocation": [21.018817, 105.792563], "endLocation": [21.014328, 105.795653] },
+{ "name": "Nguyen Chanh 1", "startSensor": "S1", "endSensor": "S3", "startLocation": [21.02014, 105.785783], "endLocation": [21.016492, 105.788701] },
+{ "name": "Nguyen Chanh 2", "startSensor": "S3", "endSensor": "S5", "startLocation": [21.016492, 105.788701], "endLocation": [21.011802, 105.792435] }];
 function initializeMapAndRoutes() {
-  var roads = [{
-    "name": "DDN",
-    "startSensor": "S1",
-    "endSensor": "S2"
-  },
-  {
-    "name": "MTTO",
-    "startSensor": "S3",
-    "endSensor": "S4"
-  }, 
-  {
-    "name": "MTTONG",
-    "startSensor": "S5",
-    "endSensor": "S6"
-  },
-  {
-    "name": "TK1",
-    "startSensor": "S2",
-    "endSensor": "S4"
-  },
-  {
-    "name": "TK2",
-    "startSensor": "S4",
-    "endSensor": "S6"
-  },
-  {
-    "name": "NC1",
-    "startSensor": "S1",
-    "endSensor": "S3"
-  },
-  {
-    "name": "NC2",
-    "startSensor": "S3",
-    "endSensor": "S5"
-  }];
+
 
   // Create markers for each sensor point and lines for roads
   roads.forEach(road => {
     var startSensor = sensors.find(sensor => sensor.id === road.startSensor);
     var endSensor = sensors.find(sensor => sensor.id === road.endSensor);
-  
-    // Calculate the average CO2 for this road
+
     var averageCO2 = (startSensor.CO2 + endSensor.CO2) / 2;
 
-    // Create a line for this road, with color based on average CO2
     var line = L.polyline([
-        [startSensor.lat, startSensor.lng],
-        [endSensor.lat, endSensor.lng]
-    ], {color: trafficColor(averageCO2)}).addTo(map);
+      road.startLocation,
+      road.endLocation
+    ], { color: trafficColor(averageCO2) }).addTo(map);
 
-    // Add the line to the lines array, using the road name as the key
-    lines[road.name] = {line: line, averageCO2: averageCO2};
+    lines[road.name] = { line: line, averageCO2: averageCO2 };
 
-    // Create the graph for Dijkstra's algorithm
-    var distance = calculateDistance(startSensor.lat, startSensor.lng, endSensor.lat, endSensor.lng);
+    
+    var distance = calculateDistance(...road.startLocation, ...road.endLocation);
     var score = averageCO2 * distance;
     if (!roadGraph[road.startSensor]) roadGraph[road.startSensor] = {};
     if (!roadGraph[road.endSensor]) roadGraph[road.endSensor] = {};
     roadGraph[road.startSensor][road.endSensor] = score;
-    roadGraph[road.endSensor][road.startSensor] = score; // Assuming bidirectional roads
-  });
+    roadGraph[road.endSensor][road.startSensor] = score; 
 
-  // Add colored circles at sensor locations
-  sensors.forEach(sensor => {
-    var circle = L.circle([sensor.lat, sensor.lng], {
-        color: trafficColor(sensor.CO2),
-        radius: 50
+    L.circle(road.startLocation, {
+      color: trafficColor(sensors.find(sensor => sensor.id === road.startSensor).CO2),
+      radius: 50
+    }).addTo(map);
+
+    L.circle(road.endLocation, {
+      color: trafficColor(sensors.find(sensor => sensor.id === road.endSensor).CO2),
+      radius: 50
     }).addTo(map);
   });
 
@@ -117,16 +89,18 @@ function trafficColor(co2) {
   if (co2 > 50 && co2 <= 100) {
     return 'red';
   }
-  return 'gray'; // default color if none of the conditions match
+  return 'gray';
 }
 
 function onMapClick(e) {
   L.popup()
-        .setLatLng(e.latlng)
-        .setContent("You clicked the map at " + e.latlng.toString())
-        .openOn(map);
+    .setLatLng(e.latlng)
+    .setContent("You clicked the map at " + e.latlng.toString())
+    .openOn(map);
 }
+
 map.on('click', onMapClick);
+
 function calculateDistance(lat1, lng1, lat2, lng2) {
   return Math.sqrt(Math.pow(lat2 - lat1, 2) + Math.pow(lng2 - lng1, 2));
 }
@@ -145,14 +119,14 @@ function showBestRoute() {
 
   // Reset all lines to their original colors
   for (var roadName in lines) {
-    lines[roadName].line.setStyle({color: trafficColor(lines[roadName].averageCO2)});
+    lines[roadName].line.setStyle({ color: trafficColor(lines[roadName].averageCO2) });
   }
 
   // Highlight the lines in the best route
   for (var roadName of bestRoute) {
-    lines[roadName].line.setStyle({color: 'blue'});
+    lines[roadName].line.setStyle({ color: 'blue' });
   }
-
+  highlightedRoute = bestRoute;
   document.getElementById('best-route').innerHTML = 'The best route is: ' + bestRoute.join(' -> ');
 }
 
@@ -187,24 +161,55 @@ function findBestRoute(startSensor, endSensor) {
       var alt = distances[currentSensor] + score;
       if (alt < distances[adjacentSensor]) {
         distances[adjacentSensor] = alt;
-        previous[adjacentSensor] = { sensor: currentSensor, roadName: findRoadName(currentSensor, adjacentSensor)};
+        previous[adjacentSensor] = { sensor: currentSensor, roadName: findRoadName(currentSensor, adjacentSensor) };
       }
     }
   }
   return null;
 }
 function findRoadName(startSensor, endSensor) {
-  for (let [key, value] of Object.entries(lines)) {
-    if ((value.line._latlngs[0].lat === sensors.find(sensor => sensor.id === startSensor).lat && 
-         value.line._latlngs[0].lng === sensors.find(sensor => sensor.id === startSensor).lng &&
-         value.line._latlngs[1].lat === sensors.find(sensor => sensor.id === endSensor).lat &&
-         value.line._latlngs[1].lng === sensors.find(sensor => sensor.id === endSensor).lng) || 
-        (value.line._latlngs[1].lat === sensors.find(sensor => sensor.id === startSensor).lat &&
-         value.line._latlngs[1].lng === sensors.find(sensor => sensor.id === startSensor).lng &&
-         value.line._latlngs[0].lat === sensors.find(sensor => sensor.id === endSensor).lat &&
-         value.line._latlngs[0].lng === sensors.find(sensor => sensor.id === endSensor).lng)) {
-      return key;
+  for (let road of roads) {
+    if ((road.startSensor === startSensor && road.endSensor === endSensor) ||
+      (road.endSensor === startSensor && road.startSensor === endSensor)) {
+      return road.name;
     }
   }
   return null;
+}
+
+
+function updateMap(sensors) {
+  // Remove old markers and lines from the map
+  for (let line in lines) {
+    map.removeLayer(lines[line].line);
+  }
+
+  roads.forEach(road => {
+    var startSensor = sensors.find(sensor => sensor.id === road.startSensor);
+    var endSensor = sensors.find(sensor => sensor.id === road.endSensor);
+  
+    var averageCO2 = (startSensor.CO2 + endSensor.CO2) / 2;
+    var line = L.polyline([
+      road.startLocation,
+      road.endLocation
+    ], {color: trafficColor(averageCO2)}).addTo(map);
+    if (highlightedRoute && highlightedRoute.includes(road.name)) {
+      line.setStyle({ color: 'blue' });
+    }
+    lines[road.name] = {line: line, averageCO2: averageCO2};
+    var distance = calculateDistance(...road.startLocation, ...road.endLocation);
+    var score = averageCO2 * distance;
+    if (!roadGraph[road.startSensor]) roadGraph[road.startSensor] = {};
+    if (!roadGraph[road.endSensor]) roadGraph[road.endSensor] = {};
+    roadGraph[road.startSensor][road.endSensor] = score;
+    roadGraph[road.endSensor][road.startSensor] = score; 
+    L.circle(road.startLocation, {
+      color: trafficColor(sensors.find(sensor => sensor.id === road.startSensor).CO2),
+      radius: 50
+    }).addTo(map);
+    L.circle(road.endLocation, {
+      color: trafficColor(sensors.find(sensor => sensor.id === road.endSensor).CO2),
+      radius: 50
+    }).addTo(map);
+  });
 }
